@@ -7,6 +7,7 @@ import java.util
 import com.alibaba.fastjson.JSON
 import com.atguigu.gmall.common.constant.Constants
 import com.atguigu.gmall.realtime.util.{MyKafkaUtil, RedisUtil}
+import org.apache.hadoop.conf.Configuration
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.spark.SparkConf
 import org.apache.spark.broadcast.Broadcast
@@ -67,19 +68,27 @@ object DauApp {
             case (mid, startUpLogIt) =>
                 startUpLogIt.toList.take(1)
         }
-        distictDstream.foreachRDD{
-            rdd=>
-                rdd.foreachPartition{
-                    startuplogIt=>
-                        val jedis:Jedis = RedisUtil.getJedisClient
+        //将数据添加到redis中
+        distictDstream.foreachRDD {
+            rdd =>
+                rdd.foreachPartition {
+                    startuplogIt =>
+                        val jedis: Jedis = RedisUtil.getJedisClient
                         for (startuplog <- startuplogIt) {
                             val key = "dau:" + startuplog.logDate
-                            jedis.sadd(key,startuplog.mid)
+                            jedis.sadd(key, startuplog.mid)
                             println(startuplog)
                         }
                         jedis.close()
                 }
         }
+        import org.apache.phoenix.spark._
+        //将过滤之后的数据添加到hbase+phoenix
+        distictDstream.foreachRDD(rdd=>{
+            rdd.saveToPhoenix("GMALL_DAU",Seq("MID", "UID", "APPID", "AREA", "OS", "CH", "TYPE", "VS", "LOGDATE", "LOGHOUR", "TS"),new Configuration(),Some("hadoop102,hadoop103,hadoop104:2181"))
+        })
+
+
         ssc.start()
         ssc.awaitTermination()
     }
